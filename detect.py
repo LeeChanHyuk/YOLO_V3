@@ -18,7 +18,7 @@ def arg_parse():
     parser = argparse.ArgumentParser(description='YOLO V3 Model parameters')
     parser.add_argument("--images", dest = 'images', help = 
                         "Image / Directory containing images to perform detection upon",
-                        default = "imgs", type = str)
+                        default = "dog-cycle-car.png", type = str)
     parser.add_argument("--det", dest = 'det', help = 
                         "Image / Directory to store detections to",
                         default = "det", type = str)
@@ -43,7 +43,7 @@ batch_size = int(args.bs)
 confidence = float(args.confidence)
 nms_thresh = float(args.nms_thresh)
 start = 0
-CUDA = torch.cuda.is_avilable()
+CUDA = torch.cuda.is_available()
 num_classes = 80
 classes = load_classes('data/coco.names')
 
@@ -121,7 +121,7 @@ if CUDA:
     
 leftover = 0
 # 배치로 자르고 마지막 조금 남았을 때, 그걸 처리하기 위한 leftover 변수.
-if im_dim_list % batch_size:
+if len(im_dim_list) % batch_size:
     leftover = 1
 
 if batch_size != 1:
@@ -139,7 +139,7 @@ for i, batch in enumerate(im_batches):
     if CUDA:
         batch = batch.cuda()
 
-    prediction = model(Variable(batch, volatile=True)) # volatile은 inference mode에서 사용되는 기능으로, forward pass에서는 모든 node에 관한 gradient를 모두 저장해두고 있어야하는데,
+    prediction = model(Variable(batch, volatile=True), CUDA) # volatile은 inference mode에서 사용되는 기능으로, forward pass에서는 모든 node에 관한 gradient를 모두 저장해두고 있어야하는데,
     # volatile을 True로 설정하면 이걸 저장해두지 않아서, 시간적으로나 메모리적으로나 save된다.
     prediction = write_results(prediction, confidence, num_classes, nms_thresh)
 
@@ -171,11 +171,71 @@ for i, batch in enumerate(im_batches):
     if CUDA:
         torch.cuda.synchronize()
 
-    try:
-        output
-    except NameError:
-        print('No detection were made')
-        exit()
+
+try:
+    output
+except NameError:
+    print('No detection were made')
+    exit()
+
+im_dim_list = torch.index_select(im_dim_list, 0, output[:,0].long())
+
+scaling_factor = torch.min(416/im_dim_list,1)[0].view(-1,1)
+
+# Input image 내에서의 bounding box coordinate 보정
+output[:,[1,3]] -= (inp_dim - scaling_factor*im_dim_list[:,0].view(-1,1))/2
+output[:,[2,4]] -= (inp_dim - scaling_factor*im_dim_list[:,1].view(-1,1))/2
+output[:,1:5] /= scaling_factor
+
+# Image를 삐져나가는 bounding box 처for i in range(output.shape[0]):
+output[i, [1,3]] = torch.clamp(output[i, [1,3]], 0.0, im_dim_list[i,0])
+output[i, [2,4]] = torch.clamp(output[i, [2,4]], 0.0, im_dim_list[i,1])
+
+output_recast = time.time()
+class_load = time.time()
+colors = pkl.load(open("pallete", "rb"))
+
+def writes(x, results):
+    #x = x.cpu().detach().numpy()
+    c1 = (int(x[1].item()), int(x[2].item()))
+    c2 = (int(x[3].item()), int(x[4].item()))
+    print(c1)
+    print(c2)
+    img = results[int(x[0])]
+    cls = int(x[-1])
+    color = random.choice(colors)
+    label = "{0}".format(classes[cls])
+    cv2.rectangle(img, c1, c2,color, 1)
+    t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 1 , 1)[0]
+    c2 = c1[0] + t_size[0] + 3, c1[1] + t_size[1] + 4
+    cv2.rectangle(img, c1, c2,color, -1)
+    cv2.putText(img, label, (c1[0], c1[1] + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 1, [225,255,255], 1);
+    return img
+
+draw = time.time()
+list(map(lambda x: writes(x, loaded_ims), output))
+
+det_names = pd.Series(imlist).apply(lambda x: "{}/det_{}".format(args.det,x.split("/")[-1]))
+list(map(cv2.imwrite, det_names, loaded_ims))
+end = time.time()
+
+print("SUMMARY")
+print("----------------------------------------------------------")
+print("{:25s}: {}".format("Task", "Time Taken (in seconds)"))
+print()
+print("{:25s}: {:2.3f}".format("Reading addresses", load_batch - read_dir))
+print("{:25s}: {:2.3f}".format("Loading batch", start_det_loop - load_batch))
+print("{:25s}: {:2.3f}".format("Detection (" + str(len(imlist)) +  " images)", output_recast - start_det_loop))
+print("{:25s}: {:2.3f}".format("Output Processing", class_load - output_recast))
+print("{:25s}: {:2.3f}".format("Drawing Boxes", end - draw))
+print("{:25s}: {:2.3f}".format("Average time_per_img", (end - load_batch)/len(imlist)))
+print("----------------------------------------------------------")
+
+
+torch.cuda.empty_cache()
+
+
+    
 
     
 

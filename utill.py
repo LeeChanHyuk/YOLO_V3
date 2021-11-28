@@ -83,7 +83,7 @@ def write_results(prediction, confidence, num_classes, nms_conf = 0.4):
         image_pred = prediction[ind]
         # prediction shape = [grid * grid * anchor_num, bounding box information]
         # bounding box information = [bounding box center_x, center_y, w, h, objectness probability, class probability]
-        max_conf, max_conf_score = torch.max(image_pred[5:], 1)
+        max_conf, max_conf_score = torch.max(image_pred[:,5: 5 + num_classes], 1)
         max_conf = max_conf.float().unsqueeze(1)
         max_conf_score = max_conf_score.float().unsqueeze(1)
         seq = (image_pred[:,:5], max_conf, max_conf_score)
@@ -131,8 +131,8 @@ def write_results(prediction, confidence, num_classes, nms_conf = 0.4):
                 image_pred_class[i+1:] *= iou_mask
                 
                 # Remove the zero-entries
-                non_zero_ind = torch.nonzero(image_pred_class[:4]).squeeze()
-                image_pred_class = image_pred_class[non_zero_ind].view(-1, 7)
+                non_zero_ind = torch.nonzero(image_pred_class[:,4]).squeeze()
+                image_pred_class = image_pred_class[non_zero_ind].view(-1,7)
                 
                 # make result
                 batch_ind = image_pred_class.new(image_pred_class.size(0),1).fill_(ind)
